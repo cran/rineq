@@ -1,6 +1,7 @@
 #' @title Decomposition analysis
 #' 
 #' @description Used by the wrapper [contribution()] but can be used manually. Calculates the decomposition for a given regression model. 
+#' @details NOTE: Only models with data with ordinary indexes are supported (starting from 1, sequentially increasing by increments of 1). For the case were rows with `NA` are automatically omitted by the model function, the used indices are guessed based on the row names of the model matrix and then used for accessing the `ranker` variable. However, this may lead to issues if the row names do not correspond to ordinary integer indexes. 
 #' 
 #' @param outcome Outcome variable
 #' @param betas  Beta coefficients from regression. 
@@ -11,6 +12,7 @@
 #' @param citype Character, CI type to be calculated, defaults to `CI`. Use `CIw` for binary outcomes. 
 #'
 #' @return S3 object of class decomposition
+#' @export
 #' @importFrom stats confint
 #' 
 #' @examples
@@ -19,10 +21,30 @@
 #'                        mtcars$hp, wt = rep(1, nrow(mtcars)), correction = FALSE) 
 #' summary(decomp)
 #' 
-#' @export
 decomposition <- function(outcome, betas, mm, ranker, wt, correction, citype = "CI") {    
-    # define an index vector for the rows that are actually used in the model, rownames are strings
+  
+  
+    # The ranking variable (wealth, income,...) should be given explicitly
+    # Throw an error if it is not numeric or integer
+    stopifnot("Ranking variable is not numeric" = inherits(ranker, "numeric") || inherits(ranker, "integer"))
+  
+  
+    # define an index vector for the rows that are actually used in the model, rownames are strings that should be converted to integer
+    # this functionality is very-bug prone and the individual implementation of rownames could vary a lot between modeling packages
+    # but keep for compatibility, try to check as good as we can
     rows <- as.numeric(rownames(mm))
+    
+    if(is.null(rows) &&  length(rows) == 0 ){
+      # no rokwnames set -> generate sequental indeces
+      rows = 1:NROW(mm)
+    } 
+    
+    if(any(is.na(ranker[rows]))){
+      stop("Rownames of modelmatrix are invalid ranker indeces, re-run the model with data without any or with ordinary integer indeces as row names. Possibly caused by rows being automatically omitted in the model estimation, make sure to manually remove NAs before running the model.") 
+    } 
+    if(length(rows) != length(ranker)){
+      stop(paste0("Length of rownames of model matrix", length(rows)," does not correspond to 'ranker' length ", length(ranker),", re-run the model with data without any or with ordinary integer indeces as row names. Possibly caused by rows being automatically omitted in the model estimation, make sure to manually remove NAs before running the model."))
+    }               
 
     # correct the sign for the partial outcomes when requested
     corrected <- rep(FALSE, ncol(mm))
@@ -63,7 +85,7 @@ decomposition <- function(outcome, betas, mm, ranker, wt, correction, citype = "
     # then subtract the sum of all partial contributions
     CIoverall <- ci(ranker[rows], as.numeric(outcome), wt, type = citype)
     CIresid <- concentration_index(CIoverall) - sumOfContributions
-    
+
     # add the residual CI to the contributions vector and name it
     contributions <- c(CIresid, contributions)
     names(contributions)[1] <- "residual"
@@ -85,5 +107,6 @@ decomposition <- function(outcome, betas, mm, ranker, wt, correction, citype = "
 		 outcome_corrected = outcome_corrected,
 		 rows = rows)
     class(results) <- "decomposition"
+    
     return(results)   
 }
